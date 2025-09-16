@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 import qrcode
 import os
 import uuid
-import random  # For cool feature (random tip)
+import random
 
 # Enable logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -53,14 +53,14 @@ def init_db():
         username TEXT,
         full_name TEXT,
         email TEXT,
-        date_joined TEXT,
+        date_joined TEXT DEFAULT 'N/A',
         balance REAL DEFAULT 0,
         wallet TEXT,
-        level TEXT,
-        status TEXT,
-        active_deposits TEXT,
-        last_deposit TEXT,
-        last_withdraw TEXT,
+        level TEXT DEFAULT 'N/A',
+        status TEXT DEFAULT 'N/A',
+        active_deposits TEXT DEFAULT 'N/A',
+        last_deposit TEXT DEFAULT 'N/A',
+        last_withdraw TEXT DEFAULT 'N/A',
         referral_code TEXT,
         referred_by TEXT,
         referral_count INTEGER DEFAULT 0,
@@ -100,6 +100,7 @@ def get_or_create_user(user_id, username, full_name, email=""):
                   (user_id, username, full_name, email, "N/A", referral_code))
         conn.commit()
     conn.close()
+    return get_user_data(user_id)
 
 # Update user field
 def update_user_field(user_id, field, value):
@@ -110,16 +111,9 @@ def update_user_field(user_id, field, value):
         c.execute("SELECT changes()")
         changes = c.fetchone()[0]
         conn.commit()
-        success = changes > 0
-        if not success:
-            logger.error(f"No rows updated for user_id {user_id}, field {field}, value {value}")
-        return success
+        return changes > 0
     except sqlite3.Error as e:
         logger.error(f"SQLite error updating {field} for user_id {user_id}: {str(e)}")
-        conn.rollback()
-        return False
-    except Exception as e:
-        logger.error(f"Unexpected error updating {field} for user_id {user_id}: {str(e)}")
         conn.rollback()
         return False
     finally:
@@ -145,49 +139,33 @@ def generate_qr_code(address):
 
 # Generate summary image
 def generate_summary_image(user_data):
-    img = Image.new("RGB", (400, 600), color=(255, 165, 0))  # Orange base
+    img = Image.new("RGB", (400, 600), color=(255, 165, 0))
     draw = ImageDraw.Draw(img)
-    # White middle
     draw.rectangle([(50, 50), (350, 550)], fill=(255, 255, 255))
-    # Orange top/bottom/sides
     draw.rectangle([(0, 0), (400, 50)], fill=(255, 165, 0))
     draw.rectangle([(0, 550), (400, 600)], fill=(255, 165, 0))
     draw.rectangle([(0, 50), (50, 550)], fill=(255, 165, 0))
     draw.rectangle([(350, 50), (400, 550)], fill=(255, 165, 0))
     
     try:
-        font = ImageFont.truetype("arialbd.ttf", 18)  # Smaller font size for better fit
-        title_font = ImageFont.truetype("arialbd.ttf", 24)  # Smaller title to make it fully visible
+        font = ImageFont.truetype("arialbd.ttf", 18)
+        title_font = ImageFont.truetype("arialbd.ttf", 24)
     except:
         font = ImageFont.load_default()
         title_font = ImageFont.load_default()
     
-    # Add title (centered)
     title_text = "Bit Mining UK Account Summary"
     title_width = draw.textlength(title_text, font=title_font)
     draw.text(((400 - title_width) / 2, 10), title_text, fill=(0, 0, 0), font=title_font)
     
-    fields = [
-        ".Full Name: ",
-        ".Username: ",
-        ".Balance: ",
-        ".Active Deposits: ",
-        ".Last Deposit: ",
-        ".Last Withdraw: ",
-        ".Level: ",
-        ".Status: ",
-        ".Referral Count: ",
-        ".Rewards: ",
-        ".Date Joined: ",
-    ]
-    
+    fields = [".Full Name: ", ".Username: ", ".Balance: ", ".Active Deposits: ", ".Last Deposit: ", ".Last Withdraw: ", ".Level: ", ".Status: ", ".Referral Count: ", ".Rewards: ", ".Date Joined: "]
     values = [
         user_data[2] or 'N/A',
         user_data[1] or 'N/A',
         f"${user_data[5]:,.2f}" if user_data[5] is not None else '$0.00',
-        user_data[9] or 'None',
-        user_data[10] or 'None',
-        user_data[11] or 'None',
+        user_data[9] or 'N/A',
+        user_data[10] or 'N/A',
+        user_data[11] or 'N/A',
         user_data[7] or 'N/A',
         user_data[8] or 'N/A',
         str(user_data[14] or 0),
@@ -195,13 +173,12 @@ def generate_summary_image(user_data):
         user_data[4] or 'N/A',
     ]
     
-    y = 60  # Start higher to fit
+    y = 60
     for field, value in zip(fields, values):
         draw.text((60, y), field, fill=(0, 0, 0), font=font)
-        draw.text((200, y), value, fill=(0, 128, 0), font=font)  # Green for values
-        y += 35  # Reduced increment to fit in white area
+        draw.text((200, y), value, fill=(0, 128, 0), font=font)
+        y += 35
     
-    # Add footer text centered on orange bottom
     footer_text = "Your success is our priority!"
     footer_width = draw.textlength(footer_text, font=font)
     draw.text(((400 - footer_width) / 2, 560), footer_text, fill=(255, 255, 255), font=font)
@@ -260,7 +237,7 @@ def setting_menu():
 # Start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    get_or_create_user(user.id, user.username, user.full_name)
+    user_data = get_or_create_user(user.id, user.username, user.full_name)
     tips = [
         "💡 Tip: Start with a small deposit to test the waters!",
         "💡 Tip: Refer friends to earn extra rewards!",
@@ -278,7 +255,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_data = get_user_data(user_id)
-    logger.info(f"Deposit command triggered for user {user_id}")
     if not user_data[6]:  # Check wallet
         await update.message.reply_text(
             "❌ Please set your wallet via /setting first! 🚫",
@@ -290,7 +266,6 @@ async def deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def deposit_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     plan_text = update.message.text
-    logger.info(f"Selected plan: {plan_text}")
     if plan_text == "⬅️ Back to Main Menu":
         await update.message.reply_text("👋 Back to main menu:", reply_markup=main_menu())
         return ConversationHandler.END
@@ -365,7 +340,13 @@ async def deposit_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     c = conn.cursor()
     c.execute("INSERT INTO deposits (deposit_id, user_id, amount, plan, crypto, tx_id, timestamp, expiry, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
               (deposit_id, user_id, amount, plan, crypto, tx_id, timestamp, expiry, "pending"))
-    c.execute("UPDATE users SET last_deposit = ? WHERE user_id = ?", (time.strftime("%Y-%m-%d %H:%M:%S"), user_id))
+    c.execute("UPDATE users SET last_deposit = ? WHERE user_id = ?", ("Updated", user_id))
+    active_deposits = c.execute("SELECT active_deposits FROM users WHERE user_id = ?", (user_id,)).fetchone()[0] or "N/A"
+    if active_deposits == "N/A":
+        active_deposits = f"{plan}: ${amount:,.2f}"
+    else:
+        active_deposits += f", {plan}: ${amount:,.2f}"
+    c.execute("UPDATE users SET active_deposits = ? WHERE user_id = ?", (active_deposits, user_id))
     conn.commit()
     conn.close()
     plan_data = PLANS[plan]
@@ -383,7 +364,6 @@ async def deposit_txid(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reinvest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_data = get_user_data(user_id)
-    logger.info(f"Reinvest command triggered for user {user_id}")
     if user_data[5] <= 0:
         await update.message.reply_text(
             "❌ Your balance is $0. Please deposit first! 🚫",
@@ -395,7 +375,6 @@ async def reinvest(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def reinvest_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     plan_text = update.message.text
-    logger.info(f"Selected reinvest plan: {plan_text}")
     if plan_text == "⬅️ Back to Main Menu":
         await update.message.reply_text("👋 Back to main menu:", reply_markup=main_menu())
         return ConversationHandler.END
@@ -433,6 +412,13 @@ async def reinvest_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
         c = conn.cursor()
         c.execute("INSERT INTO deposits (deposit_id, user_id, amount, plan, timestamp, expiry, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
                   (deposit_id, user_id, amount, plan, timestamp, expiry, "pending"))
+        c.execute("UPDATE users SET last_deposit = ? WHERE user_id = ?", ("Updated", user_id))
+        active_deposits = c.execute("SELECT active_deposits FROM users WHERE user_id = ?", (user_id,)).fetchone()[0] or "N/A"
+        if active_deposits == "N/A":
+            active_deposits = f"{plan}: ${amount:,.2f}"
+        else:
+            active_deposits += f", {plan}: ${amount:,.2f}"
+        c.execute("UPDATE users SET active_deposits = ? WHERE user_id = ?", (active_deposits, user_id))
         conn.commit()
         conn.close()
         plan_data = PLANS[plan]
@@ -453,7 +439,6 @@ async def reinvest_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_data = get_user_data(user_id)
-    logger.info(f"Withdraw command triggered for user {user_id}")
     if not user_data[6]:
         await update.message.reply_text(
             "❌ Please set your wallet via /setting first! 🚫",
@@ -504,24 +489,29 @@ async def withdraw_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     amount = context.user_data["withdraw_amount"]
     user_data = get_user_data(user_id)
     await update.message.reply_text(
-        f"✅ Your withdrawal request of ${amount:,.2f} to wallet {user_data[6]} has been submitted. 🎉 After blockchain confirmation, you will receive your funds.",
+        f"✅ Your withdrawal request of ${amount:,.2f} to wallet {user_data[6]} has been submitted. 🎉 You will see your fields on your wallet soon 🕒",
         reply_markup=main_menu()
     )
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=f"🔔 New Withdrawal Request\nUser ID: {user_id}\nAmount: ${amount:,.2f}"
     )
+    conn = sqlite3.connect("database.db")
+    c = conn.cursor()
+    c.execute("UPDATE users SET last_withdraw = ? WHERE user_id = ?", ("Updated", user_id))
+    conn.commit()
+    conn.close()
     return ConversationHandler.END
 
 # Dashboard
 async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    logger.info(f"Dashboard command triggered for user {user_id}")
+    if context.args and context.args[0].isdigit():
+        user_id = int(context.args[0])
     user_data = get_user_data(user_id)
     if user_data is None:
-        logger.error(f"No user data found for user_id {user_id}")
         await update.message.reply_text(
-            "❌ Error: User data not found. Please contact support. 🚫",
+            f"❌ Error: User data not found for ID {user_id}. Use /readd_user {user_id} to add. 🚫",
             reply_markup=main_menu()
         )
         return
@@ -532,21 +522,20 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👤 Full Name: {user_data[2] or 'N/A'}\n"
         f"📛 Username: {user_data[1] or 'N/A'}\n"
         f"💰 Balance: ${balance:,.2f}\n"
-        f"📈 Active Deposits: {user_data[9] or 'None'}\n"
-        f"📥 Last Deposit: {user_data[10] or 'None'}\n"
-        f"📤 Last Withdraw: {user_data[11] or 'None'}\n"
-        f"🏅 Level: {user_data[7] or 'N/A'}\n"
-        f"🔔 Status: {user_data[8] or 'N/A'}\n"
+        f"📈 Active Deposits: {user_data[9]}\n"
+        f"📥 Last Deposit: {user_data[10]}\n"
+        f"📤 Last Withdraw: {user_data[11]}\n"
+        f"🏅 Level: {user_data[7]}\n"
+        f"🔔 Status: {user_data[8]}\n"
         f"👥 Referral Count: {user_data[14] or 0}\n"
         f"🎁 Rewards: ${rewards:,.2f}\n"
-        f"📅 Date Joined: {user_data[4] or 'N/A'}"
+        f"📅 Date Joined: {user_data[4]}"
     )
     await update.message.reply_text(text, reply_markup=main_menu())
 
 # Summary
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    logger.info(f"Summary command triggered for user {user_id}")
     user_data = get_user_data(user_id)
     img_path = generate_summary_image(user_data)
     await update.message.reply_photo(
@@ -559,7 +548,6 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Profile
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    logger.info(f"Profile command triggered for user {user_id}")
     user_data = get_user_data(user_id)
     text = (
         f"👤 Profile\n\n"
@@ -567,9 +555,9 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👤 Full Name: {user_data[2] or 'N/A'}\n"
         f"📧 Email: {user_data[3] or 'N/A'}\n"
         f"💳 Wallet: {user_data[6] or 'N/A'}\n"
-        f"🏅 Level: {user_data[7] or 'N/A'}\n"
-        f"🔔 Status: {user_data[8] or 'N/A'}\n"
-        f"📅 Date Joined: {user_data[4] or 'N/A'}\n"
+        f"🏅 Level: {user_data[7]}\n"
+        f"🔔 Status: {user_data[8]}\n"
+        f"📅 Date Joined: {user_data[4]}\n"
         f"👥 Referral Count: {user_data[14] or 0}"
     )
     await update.message.reply_text(text, reply_markup=main_menu())
@@ -577,13 +565,11 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Setting conversation
 async def setting(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    logger.info(f"Setting command triggered for user {user_id}")
     await update.message.reply_text("⚙️ Select a field to update:", reply_markup=setting_menu())
     return SETTING_FIELD
 
 async def setting_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
     field = update.message.text
-    logger.info(f"Selected setting field: {field}")
     if field == "⬅️ Back to Main Menu":
         await update.message.reply_text("👋 Back to main menu:", reply_markup=main_menu())
         return ConversationHandler.END
@@ -603,8 +589,8 @@ async def setting_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def setting_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     field = context.user_data["field"]
     value = update.message.text
-    success = update_user_field(update.effective_user.id, field, value)
-    if success:
+    user_id = update.effective_user.id
+    if update_user_field(user_id, field, value):
         await update.message.reply_text(
             f"✅ {field.replace('_', ' ').title()} updated successfully! 🎉",
             reply_markup=main_menu()
@@ -619,7 +605,6 @@ async def setting_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Support
 async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    logger.info(f"Support command triggered for user {user_id}")
     await update.message.reply_text(
         "Contact us ON EMAIL bitminingukmail@gmail.com for help! \nWe are 24/7 online! 📩",
         reply_markup=main_menu()
@@ -628,7 +613,6 @@ async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Referral
 async def referral(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    logger.info(f"Referral command triggered for user {user_id}")
     user_data = get_user_data(user_id)
     rewards = user_data[15] if user_data[15] is not None else 0
     text = (
@@ -650,57 +634,62 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     try:
         user_id = int(args[0])
-        if cmd in ["set_datejoined", "set_last_deposit", "set_last_withdraw"]:
-            value = " ".join(args[1:])
-            if cmd in ["set_last_deposit", "set_last_withdraw"]:
-                pattern = r'^\d{4}-\d{2}-\d{2} \$\d+(?:\.\d{2})?$'
-                if not re.match(pattern, value):
-                    await update.message.reply_text(
-                        "❌ Invalid format. Use YYYY-MM-DD $amount (e.g., 2025-09-10 $1000.00). 🚫",
-                        reply_markup=main_menu()
-                    )
-                    return
-            elif cmd == "set_datejoined":
-                date_pattern = r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
-                if not re.match(date_pattern, value):
-                    await update.message.reply_text(
-                        "❌ Invalid date format. Use YYYY-MM-DD HH:MM:SS (e.g., 2025-09-10 22:24:00). 🚫",
-                        reply_markup=main_menu()
-                    )
-                    return
-        else:
-            value = args[1]
-            if cmd == "set_balance":
-                value = float(value)
-        
+        value = " ".join(args[1:])
         user_data = get_user_data(user_id)
         if not user_data:
             await update.message.reply_text(
-                f"❌ User ID {user_id} not found in the database. 🚫",
+                f"❌ User ID {user_id} not found in the database. Use /readd_user {user_id} to add. 🚫",
                 reply_markup=main_menu()
             )
             return
-        
-        success = update_user_field(user_id, cmd.split("_")[1], value)
-        if success:
-            updated_user_data = get_user_data(user_id)
-            updated_value = updated_user_data[4] if cmd == "set_datejoined" else value
-            await update.message.reply_text(
-                f"✅ {cmd.split('_')[1].title()} updated for user {user_id} to {updated_value}. 🎉",
-                reply_markup=main_menu()
-            )
-            logger.info(f"Admin updated {cmd.split('_')[1]} for user {user_id} to {value}")
+        field = cmd.replace("set_", "")
+        field_map = {
+            "datejoined": "date_joined",
+            "fullname": "full_name",
+            "lastdeposit": "last_deposit",
+            "lastwithdraw": "last_withdraw",
+            "balance": "balance",
+            "email": "email",
+            "level": "level",
+            "status": "status",
+            "wallet": "wallet",
+            "username": "username",
+            "activedeposits": "active_deposits"
+        }
+        if field in field_map:
+            db_field = field_map[field]
+            if db_field == "balance":
+                try:
+                    value = float(value)
+                    if update_user_field(user_id, db_field, value):
+                        await update.message.reply_text(
+                            f"✅ {db_field.title()} updated for user {user_id} to ${value:,.2f}. 🎉",
+                            reply_markup=main_menu()
+                        )
+                    else:
+                        await update.message.reply_text(
+                            f"❌ Failed to update {db_field.title()} for user {user_id}. Check logs. 🚫",
+                            reply_markup=main_menu()
+                        )
+                except ValueError:
+                    await update.message.reply_text("❌ Invalid amount. Use a number. 🚫", reply_markup=main_menu())
+            else:
+                if update_user_field(user_id, db_field, value):
+                    await update.message.reply_text(
+                        f"✅ {db_field.replace('_', ' ').title()} updated for user {user_id} to {value}. 🎉",
+                        reply_markup=main_menu()
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"❌ Failed to update {db_field.replace('_', ' ').title()} for user {user_id}. Check logs. 🚫",
+                        reply_markup=main_menu()
+                    )
         else:
-            await update.message.reply_text(
-                f"❌ Failed to update {cmd.split('_')[1].title()} for user {user_id}. Check logs for details. 🚫",
-                reply_markup=main_menu()
-            )
-            logger.error(f"Failed to update {cmd.split('_')[1]} for user {user_id}")
+            await update.message.reply_text(f"❌ Unknown command: /{cmd}. Check available commands. 🚫", reply_markup=main_menu())
     except ValueError:
-        await update.message.reply_text(
-            "❌ Invalid user ID or value. Ensure user_id is a number and value is correct for the command. 🚫",
-            reply_markup=main_menu()
-        )
+        await update.message.reply_text("❌ Invalid user ID or value. 🚫", reply_markup=main_menu())
+    except Exception as e:
+        logger.error(f"Error in admin_command for {field}: {str(e)}")
 
 async def set_active_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
@@ -708,23 +697,39 @@ async def set_active_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     args = update.message.text.split()[1:]
     if len(args) < 3:
-        await update.message.reply_text("❌ Invalid command format. 🚫", reply_markup=main_menu())
+        await update.message.reply_text("❌ Invalid command format. Use: /set_active_deposit <user_id> <amount> <plan> 🚫", reply_markup=main_menu())
         return
-    user_id, amount, plan = args[0], args[1], " ".join(args[2:])
-    try:
-        user_id = int(user_id)
-        amount = float(amount)
-        if plan not in PLANS:
-            await update.message.reply_text("❌ Invalid plan. 🚫", reply_markup=main_menu())
-            return
-        conn = sqlite3.connect("database.db")
-        c = conn.cursor()
-        c.execute("UPDATE users SET active_deposits = ? WHERE user_id = ?", (f"{plan}: ${amount:,.2f}", user_id))
-        conn.commit()
-        conn.close()
-        await update.message.reply_text(f"✅ Active deposit set for user {user_id}. 🎉", reply_markup=main_menu())
-    except ValueError:
-        await update.message.reply_text("❌ Invalid user ID or amount. 🚫", reply_markup=main_menu())
+    user_id, amount, plan = int(args[0]), float(args[1]), " ".join(args[2:])
+    if plan not in PLANS:
+        await update.message.reply_text("❌ Invalid plan. 🚫", reply_markup=main_menu())
+        return
+    conn = sqlite3.connect("database.db")
+    c = conn.cursor()
+    active_deposits = c.execute("SELECT active_deposits FROM users WHERE user_id = ?", (user_id,)).fetchone()[0] or "N/A"
+    if active_deposits == "N/A":
+        active_deposits = f"{plan}: ${amount:,.2f}"
+    else:
+        active_deposits += f", {plan}: ${amount:,.2f}"
+    c.execute("UPDATE users SET active_deposits = ? WHERE user_id = ?", (active_deposits, user_id))
+    conn.commit()
+    conn.close()
+    await update.message.reply_text(f"✅ Active deposit added for user {user_id}. 🎉", reply_markup=main_menu())
+
+async def readd_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Unauthorized access. 🚫", reply_markup=main_menu())
+        return
+    args = update.message.text.split()[1:]
+    if len(args) < 1:
+        await update.message.reply_text("❌ Invalid command format. Use: /readd_user <user_id> 🚫", reply_markup=main_menu())
+        return
+    user_id = int(args[0])
+    user_data = get_user_data(user_id)
+    if user_data:
+        await update.message.reply_text(f"❌ User ID {user_id} already exists. 🚫", reply_markup=main_menu())
+        return
+    get_or_create_user(user_id, "Unknown", "Unknown")
+    await update.message.reply_text(f"✅ User ID {user_id} re-added successfully. 🎉", reply_markup=main_menu())
 
 async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
@@ -760,7 +765,12 @@ async def check_expiry(context: ContextTypes.DEFAULT_TYPE):
         profit = amount * PLANS[plan]["return"]
         c.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (profit, user_id))
         c.execute("UPDATE deposits SET status = ? WHERE deposit_id = ?", ("completed", deposit_id))
-        c.execute("UPDATE users SET active_deposits = ? WHERE user_id = ?", ("None", user_id))
+        active_deposits = c.execute("SELECT active_deposits FROM users WHERE user_id = ?", (user_id,)).fetchone()[0] or "N/A"
+        if active_deposits != "N/A" and f"{plan}: ${amount:,.2f}" in active_deposits:
+            active_deposits = active_deposits.replace(f"{plan}: ${amount:,.2f}", "").replace(", ,", ",").strip(", ")
+            if not active_deposits:
+                active_deposits = "N/A"
+            c.execute("UPDATE users SET active_deposits = ? WHERE user_id = ?", (active_deposits, user_id))
         conn.commit()
         await context.bot.send_message(
             chat_id=ADMIN_ID,
@@ -821,14 +831,14 @@ def main():
     application.add_handler(CommandHandler("profile", profile))
     application.add_handler(CommandHandler("support", support))
     application.add_handler(CommandHandler("referral", referral))
-    application.add_handler(CommandHandler(["set_balance", "set_fullname", "set_email", "set_datejoined", "set_level", "set_status", "set_wallet", "set_username", "set_last_withdraw"], admin_command))
+    application.add_handler(CommandHandler(["set_balance", "set_fullname", "set_email", "set_datejoined", "set_level", "set_status", "set_wallet", "set_username", "set_lastdeposit", "set_lastwithdraw", "set_activedeposits"], admin_command))
     application.add_handler(CommandHandler("set_active_deposit", set_active_deposit))
+    application.add_handler(CommandHandler("readd_user", readd_user))
     application.add_handler(CommandHandler("send_message", send_message))
     
-    # Job queue for expiry check
-    application.job_queue.run_repeating(check_expiry, interval=60)
+    # Job queue for expiry check (run every 24 hours to avoid spam)
+    application.job_queue.run_repeating(check_expiry, interval=24 * 3600)
     
-    # Run the bot with explicit error handling
     application.run_polling(allowed_updates=Update.ALL_TYPES, timeout=30)
 
 if __name__ == "__main__":
